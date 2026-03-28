@@ -5,9 +5,9 @@ import fs from 'fs';
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
-  runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { runProviderAgent } from './provider-dispatch.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -170,7 +170,7 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
+    const output = await runProviderAgent(
       group,
       {
         prompt: task.prompt,

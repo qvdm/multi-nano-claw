@@ -13,6 +13,7 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { initSecrets } from './env.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -20,10 +21,10 @@ import {
 } from './channels/registry.js';
 import {
   ContainerOutput,
-  runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { runProviderAgent } from './provider-dispatch.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -358,7 +359,7 @@ async function runAgent(
     : undefined;
 
   try {
-    const output = await runContainerAgent(
+    const output = await runProviderAgent(
       group,
       {
         prompt,
@@ -519,6 +520,7 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  await initSecrets();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');

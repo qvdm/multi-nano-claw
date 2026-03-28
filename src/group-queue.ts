@@ -156,11 +156,24 @@ export class GroupQueue {
   /**
    * Send a follow-up message to the active container via IPC file.
    * Returns true if the message was written, false if no active container.
+   * For single-turn providers (kiro), returns false if the process has
+   * already exited so the caller enqueues a new invocation.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskContainer)
       return false;
+
+    // If the process has already exited (single-turn provider like kiro-cli),
+    // return false so the caller enqueues a new message check
+    if (
+      state.process &&
+      'exitCode' in state.process &&
+      state.process.exitCode != null
+    ) {
+      return false;
+    }
+
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');

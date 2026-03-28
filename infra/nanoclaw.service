@@ -1,0 +1,30 @@
+# NanoClaw systemd service for Amazon Linux 2023
+# Install: cp nanoclaw.service /etc/systemd/system/ && systemctl daemon-reload
+# Note: This is a reference copy. The actual service file is written by CDK user data
+# with the correct NANOCLAW_SECRETS_ARN from the deployed stack.
+
+[Unit]
+Description=NanoClaw AI Assistant
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/opt/nanoclaw
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=10
+
+# Set by CDK user data with the actual secret ARN
+Environment=NANOCLAW_SECRETS_ARN=arn:aws:secretsmanager:REGION:ACCOUNT:secret:nanoclaw/secrets
+Environment=MAX_CONCURRENT_CONTAINERS=1
+Environment=LOG_LEVEL=info
+
+# Graceful shutdown — NanoClaw drains the queue on SIGTERM (10s)
+TimeoutStopSec=15
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

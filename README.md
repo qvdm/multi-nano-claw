@@ -8,14 +8,13 @@
 
 <p align="center">
   <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
-  <a href="https://docs.nanoclaw.dev">docs</a>&nbsp; • &nbsp;
   <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
-  <a href="README_ja.md">日本語</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
+Using Claude Code, NanoClaw can dynamically rewrite its code to customize its feature set for your needs.
 
----
+**New:** First AI assistant to support [Agent Swarms](https://code.claude.com/docs/en/agent-teams). Spin up teams of agents that collaborate in your chat.
 
 ## Why I Built NanoClaw
 
@@ -26,24 +25,168 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 ## Quick Start
 
 ```bash
-gh repo fork qwibitai/nanoclaw --clone
-cd nanoclaw
+git clone https://github.com/qwibitai/NanoClaw.git
+cd NanoClaw
 claude
 ```
 
-<details>
-<summary>Without GitHub CLI</summary>
-
-1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
-2. `git clone https://github.com/<your-username>/nanoclaw.git`
-3. `cd nanoclaw`
-4. `claude`
-
-</details>
-
 Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
 
-> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
+> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal.
+
+### Running Locally
+
+NanoClaw supports two LLM providers: **Claude** (default, runs in containers) and **kiro-cli** (runs on the host or in containers). You can use either or both at the same time — each group picks its own provider.
+
+#### Claude (default)
+
+Requires Docker (or Apple Container on macOS). Agents run in isolated Linux containers via the Claude Agent SDK.
+
+```bash
+# Install dependencies
+npm install
+
+# Set up credentials in .env
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env
+# or: CLAUDE_CODE_OAUTH_TOKEN=...
+
+# Build the container image
+./container/build.sh
+
+# Add a channel and register your main chat
+claude   # then run /add-whatsapp or /add-telegram
+
+# Start
+npm run dev
+```
+
+#### kiro-cli
+
+Runs kiro-cli directly on the host as a child process — no Docker needed for kiro groups.
+
+```bash
+# Install kiro-cli
+curl -fsSL https://cli.kiro.dev/install | bash
+
+# Install dependencies
+npm install
+
+# Authenticate kiro-cli (opens browser for device code flow)
+kiro-cli auth login
+
+# Add a channel
+claude   # then run /add-whatsapp or /add-telegram
+
+# Start
+npm run dev
+```
+
+After registering a group, set its provider to kiro:
+
+```bash
+# In sqlite (or via the agent's register_group tool with containerConfig)
+sqlite3 store/messages.db "UPDATE registered_groups SET container_config = '{\"provider\":\"kiro\",\"providerMode\":\"host\"}' WHERE folder = 'whatsapp_main'"
+```
+
+#### Mixed setup (both providers)
+
+Register different groups with different providers. They run independently:
+
+```
+Group A (main self-chat) → provider: kiro, host mode
+Group B (work group)     → provider: claude, container mode
+Group C (family group)   → provider: kiro, host mode
+```
+
+See [docs/KIRO-PROVIDER.md](docs/KIRO-PROVIDER.md) for full configuration details.
+
+### Deploying to AWS
+
+NanoClaw runs on a single EC2 spot instance (~$10/month) with all infrastructure defined in CDK. Zero inbound ports — all channels use outbound connections and management is via SSM (no SSH).
+
+#### Prerequisites
+
+- AWS CLI configured with credentials
+- Node.js 20+ (for CDK)
+- Docker (to build the agent container image locally, or build on-instance)
+
+#### 1. Deploy infrastructure
+
+```bash
+cd infra
+npm install
+npx cdk bootstrap   # first time only
+npx cdk deploy
+```
+
+This creates:
+- EC2 spot instance (`t4g.small`, ARM Graviton) in an Auto Scaling Group
+- Persistent EBS volume for data (SQLite DB, groups, sessions, logs)
+- Secrets Manager secret (`nanoclaw/secrets`)
+- CloudWatch log group
+- Daily EBS backups (7-day retention)
+
+#### 2. Add secrets
+
+The CDK stack creates a placeholder secret. Populate it with your actual keys:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id nanoclaw/secrets \
+  --secret-string '{
+    "ANTHROPIC_API_KEY": "sk-ant-...",
+    "ASSISTANT_NAME": "Andy",
+    "ASSISTANT_NAME": "Andy"
+  }'
+```
+
+Add channel tokens as needed (`TELEGRAM_BOT_TOKEN`, `SLACK_BOT_TOKEN`, etc.). NanoClaw reads all secrets from Secrets Manager automatically when `NANOCLAW_SECRETS_ARN` is set — no `.env` file on the instance.
+
+#### 3. Connect to the instance
+
+```bash
+# Find instance ID
+INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names nanoclaw \
+  --query 'AutoScalingGroups[0].Instances[0].InstanceId' --output text)
+
+# Connect via SSM (no SSH needed)
+aws ssm start-session --target $INSTANCE_ID
+```
+
+#### 4. Set up channels and register groups
+
+On the instance, authenticate your messaging channel and register your main chat:
+
+```bash
+cd /opt/nanoclaw
+claude   # then run /add-whatsapp or /add-telegram
+```
+
+To use kiro on AWS, install kiro-cli on the instance and authenticate via `kiro-cli auth login` (device code flow — displays a URL you open in your browser). Then set the provider on your group (same as local setup).
+
+#### 5. Deploy updates
+
+Push code changes and deploy without SSH:
+
+```bash
+./scripts/deploy-aws.sh $INSTANCE_ID
+```
+
+This uses SSM Run Command to pull, build, and restart the service on the instance.
+
+#### Key differences from local
+
+| | Local | AWS |
+|---|---|---|
+| Secrets | `.env` file | Secrets Manager (`NANOCLAW_SECRETS_ARN`) |
+| Service | `launchctl` / `systemctl --user` | `systemctl` (systemd) |
+| Container limit | `MAX_CONCURRENT_CONTAINERS=5` | `=1` (2GB RAM budget) |
+| Management | Direct terminal | SSM Session Manager |
+| Data persistence | Local filesystem | Separate EBS volume (survives spot replacement) |
+| Cost | Free | ~$10/month |
+
+For full details, see [docs/AWS-DEPLOYMENT.md](docs/AWS-DEPLOYMENT.md).
 
 ## Philosophy
 
@@ -71,9 +214,8 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
 - **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in Docker (macOS/Linux), [Docker Sandboxes](docs/docker-sandboxes.md) (micro VM isolation), or Apple Container (macOS)
-- **Credential security** - Agents never hold raw API keys. Outbound requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects credentials at request time and enforces per-agent policies and rate limits.
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
+- **Container isolation** - Agents are sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
+- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks. NanoClaw is the first personal AI assistant to support agent swarms.
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
 ## Usage
@@ -110,7 +252,7 @@ The codebase is small enough that Claude can safely modify it.
 
 **Don't add features. Add skills.**
 
-If you want to add Telegram support, don't create a PR that adds Telegram to the core codebase. Instead, fork NanoClaw, make the code changes on a branch, and open a PR. We'll create a `skill/telegram` branch from your PR that other users can merge into their fork.
+If you want to add Telegram support, don't create a PR that adds Telegram alongside WhatsApp. Instead, contribute a skill file (`.claude/skills/add-telegram/SKILL.md`) that teaches Claude Code how to transform a NanoClaw installation to use Telegram.
 
 Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
 
@@ -121,9 +263,12 @@ Skills we'd like to see:
 **Communication Channels**
 - `/add-signal` - Add Signal as a channel
 
+**Session Management**
+- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
+
 ## Requirements
 
-- macOS, Linux, or Windows (via WSL2)
+- macOS or Linux
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
@@ -131,20 +276,27 @@ Skills we'd like to see:
 ## Architecture
 
 ```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Channels --> SQLite --> Polling loop --> Provider dispatch --> Agent --> Response
+                                             │
+                                   ┌─────────┴──────────┐
+                                   │                     │
+                            Claude (container)     kiro-cli (host)
+                            Docker/Apple Container   child process
 ```
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Each group can use a different LLM provider. Claude agents execute in isolated Linux containers; kiro-cli agents run directly on the host. Per-group message queue with concurrency control. IPC via filesystem.
 
-For the full architecture details, see the [documentation site](https://docs.nanoclaw.dev/concepts/architecture).
+For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
+- `src/provider-dispatch.ts` - Routes to Claude container or kiro-cli based on group config
+- `src/container-runner.ts` - Spawns streaming Claude agent containers
+- `src/kiro-runner.ts` - Spawns kiro-cli in host or container mode
 - `src/channels/registry.ts` - Channel registry (self-registration at startup)
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/router.ts` - Message formatting and outbound routing
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
 - `groups/*/CLAUDE.md` - Per-group memory
@@ -153,15 +305,15 @@ Key files:
 
 **Why Docker?**
 
-Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime. For additional isolation, [Docker Sandboxes](docs/docker-sandboxes.md) run each container inside a micro VM.
+Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
 
-**Can I run this on Linux or Windows?**
+**Can I run this on Linux?**
 
-Yes. Docker is the default runtime and works on macOS, Linux, and Windows (via WSL2). Just run `/setup`.
+Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
 
 **Is this secure?**
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. Credentials never enter the container — outbound API requests route through [OneCLI's Agent Vault](https://github.com/onecli/onecli), which injects authentication at the proxy level and supports rate limits and access policies. You should still review what you're running, but the codebase is small enough that you actually can. See the [security documentation](https://docs.nanoclaw.dev/concepts/security) for the full security model.
+Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
 
 **Why no configuration files?**
 
@@ -169,19 +321,17 @@ We don't want configuration sprawl. Every user should customize NanoClaw so that
 
 **Can I use third-party or open-source models?**
 
-Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
+Yes. NanoClaw supports multiple LLM providers per-group:
+
+- **Claude** (default) — Uses the Claude Agent SDK in containers. Supports any Anthropic-compatible endpoint via `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` in `.env`.
+- **kiro-cli** — Runs kiro-cli on the host or in containers. Set `provider: "kiro"` in a group's config. See [docs/KIRO-PROVIDER.md](docs/KIRO-PROVIDER.md).
+
+For Claude-compatible endpoints (Ollama, Together AI, Fireworks, custom deployments):
 
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
 ANTHROPIC_AUTH_TOKEN=your-token-here
 ```
-
-This allows you to use:
-- Local models via [Ollama](https://ollama.ai) with an API proxy
-- Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
-- Custom model deployments with Anthropic-compatible APIs
-
-Note: The model must support the Anthropic API format for best compatibility.
 
 **How do I debug issues?**
 
@@ -205,7 +355,7 @@ Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for breaking changes, or the [full release history](https://docs.nanoclaw.dev/changelog) on the documentation site.
+See [CHANGELOG.md](CHANGELOG.md) for breaking changes and migration notes.
 
 ## License
 

@@ -77,6 +77,10 @@ export function getTriggerPattern(trigger?: string): RegExp {
 
 export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
 
+// Kiro CLI configuration
+export const KIRO_CLI_PATH = process.env.KIRO_CLI_PATH || 'kiro-cli';
+export const KIRO_TIMEOUT = parseInt(process.env.KIRO_TIMEOUT || '300000', 10);
+
 // Timezone for scheduled tasks, message formatting, etc.
 // Validates each candidate is a real IANA identifier before accepting.
 function resolveConfigTimezone(): string {

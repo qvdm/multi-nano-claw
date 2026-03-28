@@ -27,9 +27,13 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export type LlmProvider = 'claude' | 'kiro';
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  provider?: LlmProvider; // Default: 'claude'
+  providerMode?: 'container' | 'host'; // Default: 'container' for claude, 'host' for kiro
 }
 
 export interface RegisteredGroup {
