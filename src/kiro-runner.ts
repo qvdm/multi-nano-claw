@@ -13,16 +13,20 @@ import {
   KIRO_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+
+/** Strip ANSI escape sequences from kiro-cli output */
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, '');
+}
 import { ContainerInput, ContainerOutput } from './container-runner.js';
 import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
 } from './container-runtime.js';
 import { readEnvFile } from './env.js';
-import {
-  resolveGroupFolderPath,
-  resolveGroupIpcPath,
-} from './group-folder.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -45,7 +49,8 @@ function writeKiroAgentConfig(groupDir: string, ipcDir: string): void {
 
   const agentConfig = {
     name: 'nanoclaw',
-    description: 'NanoClaw IPC tools — send messages, schedule tasks, manage groups',
+    description:
+      'NanoClaw IPC tools — send messages, schedule tasks, manage groups',
     tools: [
       {
         type: 'mcp',
@@ -99,9 +104,7 @@ function updateKiroAgentEnv(
  * config values are read here.
  */
 function readKiroEnvConfig(): Record<string, string> {
-  return readEnvFile([
-    'KIRO_MODEL',
-  ]);
+  return readEnvFile(['KIRO_MODEL']);
 }
 
 /**
@@ -151,6 +154,7 @@ async function runKiroHostAgent(
     const env: Record<string, string | undefined> = {
       ...process.env,
       TZ: TIMEZONE,
+      NO_COLOR: '1', // suppress ANSI escape sequences
       // Pass config as env vars for kiro-cli
       ...envConfig,
     };
@@ -252,7 +256,7 @@ async function runKiroHostAgent(
       }
 
       // Parse kiro-cli output — it writes plain text to stdout
-      const text = stdout.trim();
+      const text = stripAnsi(stdout).trim();
 
       // Try to extract session ID from stderr (kiro-cli logs session info there)
       let newSessionId: string | undefined;
@@ -357,7 +361,12 @@ async function runKiroContainerAgent(
   args.push(CONTAINER_IMAGE);
 
   // Override entrypoint to run kiro-cli instead of agent-runner
-  const kiroArgs = ['kiro-cli', 'chat', '--no-interactive', '--trust-all-tools'];
+  const kiroArgs = [
+    'kiro-cli',
+    'chat',
+    '--no-interactive',
+    '--trust-all-tools',
+  ];
   if (input.sessionId) {
     kiroArgs.push('--resume', input.sessionId);
   }
@@ -457,7 +466,7 @@ async function runKiroContainerAgent(
         return;
       }
 
-      const text = stdout.trim();
+      const text = stripAnsi(stdout).trim();
       let newSessionId: string | undefined;
       const sessionMatch = stderr.match(/session[_-]?id[:\s]+(\S+)/i);
       if (sessionMatch) {
