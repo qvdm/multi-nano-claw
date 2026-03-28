@@ -76,7 +76,7 @@ AWS_OPTS="--region $REGION"
 
 # Container build command (conditional)
 if $SKIP_CONTAINER; then
-  CONTAINER_CMD="echo Skipping container build (--skip-container)"
+  CONTAINER_CMD="echo Skipping container build"
 else
   CONTAINER_CMD="if command -v docker &>/dev/null && docker info &>/dev/null; then cd container && ./build.sh && cd ..; else echo Skipping container build; fi"
 fi
