@@ -106,9 +106,9 @@ NanoClaw runs on a single EC2 spot instance (~$10/month) with all infrastructure
 
 #### Prerequisites
 
-- AWS CLI configured with credentials
-- Node.js 20+ (for CDK)
-- Docker (to build the agent container image locally, or build on-instance)
+- AWS CLI configured with SSO or credentials
+- Node.js 20+
+- [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
 
 #### 1. Deploy infrastructure
 
@@ -116,64 +116,32 @@ NanoClaw runs on a single EC2 spot instance (~$10/month) with all infrastructure
 cd infra
 npm install
 npx cdk bootstrap   # first time only
-npx cdk deploy
+AWS_PROFILE=AYBconsole npx cdk deploy
+cd ..
 ```
 
-This creates:
-- EC2 spot instance (`t4g.small`, ARM Graviton) in an Auto Scaling Group
-- Persistent EBS volume for data (SQLite DB, groups, sessions, logs)
-- Secrets Manager secret (`nanoclaw/secrets`)
-- CloudWatch log group
-- Daily EBS backups (7-day retention)
+This creates: EC2 spot instance (`t4g.small`, ARM Graviton), persistent EBS volume, Secrets Manager, CloudWatch logs, and daily backups.
 
-#### 2. Add secrets
-
-The CDK stack creates a placeholder secret. Populate it with your actual keys:
+#### 2. Deploy code and authenticate
 
 ```bash
-aws secretsmanager put-secret-value \
-  --secret-id nanoclaw/secrets \
-  --secret-string '{
-    "ANTHROPIC_API_KEY": "sk-ant-...",
-    "ASSISTANT_NAME": "Andy",
-    "ASSISTANT_NAME": "Andy"
-  }'
+# Deploy local code to the instance (auto-discovers instance from ASG)
+./scripts/deploy-aws.sh --local --skip-container --profile AYBconsole
+
+# Authenticate kiro-cli (opens SSM session)
+./scripts/kiro-auth.sh --profile AYBconsole
+# In the session, run: /opt/nanoclaw/scripts/kiro-auth-remote.sh
 ```
 
-Add channel tokens as needed (`TELEGRAM_BOT_TOKEN`, `SLACK_BOT_TOKEN`, etc.). NanoClaw reads all secrets from Secrets Manager automatically when `NANOCLAW_SECRETS_ARN` is set — no `.env` file on the instance.
-
-#### 3. Connect to the instance
+#### 3. Deploy updates
 
 ```bash
-# Find instance ID
-INSTANCE_ID=$(aws autoscaling describe-auto-scaling-groups \
-  --auto-scaling-group-names nanoclaw \
-  --query 'AutoScalingGroups[0].Instances[0].InstanceId' --output text)
+# From local code (unpushed changes)
+./scripts/deploy-aws.sh --local --skip-container --profile AYBconsole
 
-# Connect via SSM (no SSH needed)
-aws ssm start-session --target $INSTANCE_ID
+# From GitHub (after pushing)
+./scripts/deploy-aws.sh --skip-container --profile AYBconsole
 ```
-
-#### 4. Set up channels and register groups
-
-On the instance, authenticate your messaging channel and register your main chat:
-
-```bash
-cd /opt/nanoclaw
-claude   # then run /add-whatsapp or /add-telegram
-```
-
-To use kiro on AWS, install kiro-cli on the instance and authenticate via `kiro-cli auth login` (device code flow — displays a URL you open in your browser). Then set the provider on your group (same as local setup).
-
-#### 5. Deploy updates
-
-Push code changes and deploy without SSH:
-
-```bash
-./scripts/deploy-aws.sh $INSTANCE_ID
-```
-
-This uses SSM Run Command to pull, build, and restart the service on the instance.
 
 #### Key differences from local
 
@@ -186,7 +154,7 @@ This uses SSM Run Command to pull, build, and restart the service on the instanc
 | Data persistence | Local filesystem | Separate EBS volume (survives spot replacement) |
 | Cost | Free | ~$10/month |
 
-For full details, see [docs/AWS-DEPLOYMENT.md](docs/AWS-DEPLOYMENT.md).
+For the full operational runbook (spot replacement, troubleshooting, start/stop, costs), see [docs/AWS-DEPLOYMENT.md](docs/AWS-DEPLOYMENT.md).
 
 ## Philosophy
 

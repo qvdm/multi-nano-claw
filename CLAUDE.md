@@ -12,14 +12,33 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |
+| `src/channels/whatsapp.ts` | WhatsApp channel (Baileys) |
+| `src/provider-dispatch.ts` | Routes to Claude container or kiro-cli based on group config |
+| `src/kiro-runner.ts` | Spawns kiro-cli in host or container mode |
+| `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
-| `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/config.ts` | Trigger pattern, paths, intervals, kiro config |
+| `src/env.ts` | Environment loading (`.env` or AWS Secrets Manager) |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
+
+## AWS Deployment
+
+| File | Purpose |
+|------|---------|
+| `infra/lib/nanoclaw-stack.ts` | CDK stack (EC2 spot, EBS, Secrets Manager, SSM) |
+| `infra/bin/infra.ts` | CDK app entry (region: ca-central-1, account: 172912611806) |
+| `scripts/deploy-aws.sh` | Deploy code via git pull or tar+S3 (`--local`, `--skip-container`) |
+| `scripts/kiro-auth.sh` | Local: auto-discover instance, open SSM session for kiro auth |
+| `scripts/kiro-auth-remote.sh` | Remote: run `kiro-cli login --device-flow`, restart service |
+| `scripts/setup-instance.sh` | Interactive first-time setup (secrets, WhatsApp, groups, kiro) |
+| `docs/AWS-DEPLOYMENT.md` | Full operational runbook |
+
+Deploy: `./scripts/deploy-aws.sh --local --skip-container --profile AYBconsole`
+Kiro auth: `./scripts/kiro-auth.sh --profile AYBconsole` → run `/opt/nanoclaw/scripts/kiro-auth-remote.sh`
 
 ## Secrets / Credentials / Proxy (OneCLI)
 
